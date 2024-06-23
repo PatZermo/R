@@ -1,0 +1,475 @@
+---
+title: "PREDICCIÓN DE LA RADIACIÓN SOLAR"
+author: "ZERMO DOPICO, PATRICIO ALAN"
+date: "Marzo/Abril 2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  html_notebook: default
+---
+
+## INTRODUCCIÓN
+La Oficina de Eficiencia Energética y Energias Renovables de los Estados Unidos de Norteamérica (s.f.) explica que radiación solar es un término general para definir el conjunto de radiaciones electromagnéticas emitidas por el sol. 
+
+Estas radiaciones pueden ser capturadas y convertidas en diversas formas de energias aprovechables para el ser humano tales como calor y electricidad.
+
+La radiación solar, la cual es medida en watts por metro cuadrado (*w/m^2^*), llega a todo el Planeta Tierra al menos en un momento del año, pero su cantidad podrá variar según diversos factores: hora del día, ubicación geográfica, temperatura ambiente, humedad, dirección del viento, entre otros.
+
+Si pudiera saberse de antemano la cantidad de radiación solar que se podría capturar, su aprovechamiento por el ser humano sería mas fructifero, destinando sus inversiones a ubicaciones geográficas que por sus condiciones climatológias obtengan una mayor cantidad de irradiación.
+
+Es por ello que el presente trabajo tiene como objetivo principal la predicción de la radiación solar.
+
+A su vez los objetivos específicos a traves de los cuales se busca llegar a cumplimentar el principal son: explicar en detalle la construcción de un modelo de regresión lineal en lenguaje R utilizando como predictores variables climatológicas.
+
+
+## CARGA DE LIBRERIAS
+El primer proceso que debe llevarse a cabo antes de comenzar la construcción del modelo es la carga de las librerías que se detallan a continuación.
+
+```{r, message=FALSE}
+library(readr)
+library(dplyr)
+library(corrplot)
+library(ggplot2)
+library(rms)
+library(caret)
+```
+
+## CREACIÓN DEL DATAFRAME
+Debido a que los datos obtenidos del dataset: [Solar Radiation - Kaggle.com](https://www.kaggle.com/dronio/SolarEnergy) se encuentran en un archivo .csv (**SolarPrediction.csv**) con la función `read.csv` se crea un dataframe dentro de R a partir de el mencionado archivo, el cual se denomina **radiacion**
+Esto será necesario para que las posteriores funciones que se utilicen obtengan los datos directamente desde este dataframe.
+
+```{r}
+radiacion <- read.csv("SolarPrediction.csv")
+```
+
+## ANALIZANDO LOS DATOS
+Utilizando la función `str` se podrán observar la información de cada variable que compone el dataframe: si es numérica o categórica como así también las primeras filas que las componen.
+
+```{r}
+str(radiacion)
+```
+A su vez con la función `summary` se obtienen dentro de las variables numéricas datos sobre mínimos, máximos, media, entre otros.
+
+```{r}
+summary(radiacion)
+```
+
+## CREACIÓN DE UN GRÁFICO DE CORRELACIONES ENTRE PREDICTORES
+Con la función `select_if(radiacion, is.numeric)` se crea un nuevo dataframe a partir de **radiacion** denominado: **numradiacion**: el cual solo contendra solamente las variables numéricas del primero.
+
+A su vez con `select(numradiacion, -UNIXTime)` se suprime la variable **UNIXTime** la cual contiene los datos de los segundos que han pasado desde el 01/01/1970 hasta la fecha de la medición, debido a que no será de utilidad para la correlación entre variables.
+
+Utilizando la función `cor(numradiacion)` se crea la matriz *cm* en base a ese data frame y finalmente con ´corrplot(cm)´se crea el gráfico que contiene correlación entre las variables.
+
+Finalmente y a modo estetico, se utilizan las funciones `colnames(cm)` y `rownames(cm)` se reemplaza el nombre de la variable incluido en el .csv por las etiquetas asignadas donde consta el nombre completo de la misma como así también su unidad de medida. Con `corrplot(cm, type='lower')` se logra que el gráfico no repita dos veces las correlaciones.
+
+Teniendo en cuenta el objetivo principal del presente trabajo, esto es predecir la radiación, se encuentran diversas relaciones entre esta y el resto de los predictores ya sea de forma correlacional directa (Azul) o negativa (Rojo)
+
+```{r}
+numradiacion <- select_if(radiacion, is.numeric)
+numradiacion <- select(numradiacion, -UNIXTime)
+cm <- cor(numradiacion)
+colnames(cm) <- c("Radiación (w/m^2)", "Temperatura (ºF)", "Presión barométrica (Hg)", "Humedad (%)", "Dirección del viento (º)" , "Velocidad del viento (m/h)")
+rownames(cm) <- c("Radiación (w/m^2)", "Temperatura (ºF)", "Presión barométrica (Hg)", "Humedad (%)", "Dirección del viento (º)" , "Velocidad del viento (m/h)")
+corrplot(cm, type="lower")
+```
+
+A partir de este gráfico se observa que las correlaciones directas mas significativas con la radiación son (En orden de importancia): temperatura, presión barométrica y velocidad del viento.
+A su vez las correlaciones negativas encontradas: humedad y dirección del viento, son igual de significativas.
+
+## DISTRIBUCIÓN DE LA RADIACIÓN SOLAR POR MESES
+A través de la función `geom_boxplot(aes(x=Mes, y=Radiation)` utilizando la libreria `ggplot()` se crea de un diagrama de cajas.
+A través de este gráfico se busca mostrar la distribución de la radiación medida (Variable **Radiation**) medida en los diferentes meses del año (Variable **Mes**), lo que dará una mayor calidad al analisis de los datos.
+
+Para llevar a cabo este proceso debio crearse un nuevo archivo **SolarMes.csv** y asignarsele manualmente a cada fila una nueva variable categórica denominada **Mes** (Ya que no se econtraba incluida en el .csv original) en la cual se le asigno un mes del año a todas las filas que tenian una fecha dentro del mismo.
+
+A partir de este nuevo archivo .csv se crea un dataset específico para este gráfico denominado **radiacionmes**
+
+En este gráfico puede verse el nivel de radiación distribuido por meses, existiendo una mayor cantidad de la misma durante septiembre, octubre y noviembre y la menor en diciembre.
+
+```{r}
+radiacionmes <- read.csv("SolarMes.csv")
+ggplot(radiacionmes) +
+    geom_boxplot(aes(x=Mes, y=Radiation)) 
+```
+
+
+## MODELOS DE REGRESION LINEAL
+A partir de este acápite se analizaran las relaciones entre la variable radiación (**radiation**) y los demás predictores utilizados en el presente trabajo.
+
+Se crearan tres modelos: uno simple compuesto por las variables **Radiación y Temperatura**, y dos multiples, uno compuesto por **Radiación, Temperatura y Presión** y otro por **Radiación, Temperatura, Presión, Humedad, Dirección del viento y Velocidad del viento** (La totalidad de las variables)
+
+### MODELO1 - REGRESIÓN LINEAL SIMPLE: RADIACIÓN EN BASE A LA TEMPERATURA
+Como se ha dicho anteriormente, la relación mas fuerte entre la variable objetivo radiación y los predictores se da con la temperatura (Variable **temperature**)
+
+A través de la función `geom_point()` se relacionan las variables **Temperatura** ubicada en el eje x y **Radiación** ubicada en el eje y, utilizando un gráfico de puntos.
+
+Se observa claramente la correlación directa entre ambas variables, mientras aumenta la temperatura también lo hace la radiación solar.
+
+```{r}
+ggplot(radiacion) +
+    geom_point(aes(x=Temperature, y=Radiation), color="steel blue") +
+ ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y TEMPERATURA") +
+  xlab("Temperatura (ºF)") +
+ylab("Radiación solar (w/m^2)")
+```
+
+Para poder construir el modelo objetivo, en primer lugar debe dividirse el dataset creado en primera instancia **radiacion** en dos sets: uno para entrenamiento de los datos y el otro para su testeo, utilizando una medida de 80/20.
+
+Con la función `set.seed()` se crea la base para la reproducibilidad asignandole un numero aleatorio.
+Utilizando `runif()` se crea un vector de numeros aleatorios distribuidos entre 0 y 1 para dividir los datos de manera aleatoria. 
+
+Finalmente se crean los dos dataframes buscados **dfentrenamiento** y **dftesteo** utilizando solamente las variables que interesan para el presente modelo. Como se ha dicho anteriormente con `seleccion` se busca que el primer data frame contenga un 80% de los datos y el segundo un 20%.
+
+
+```{r}
+set.seed(2312)
+seleccion <- runif(dim(radiacion)[1])
+dfentrenamiento <- select(radiacion, Radiation, Temperature)[seleccion<0.8,]
+dftesteo <- select(radiacion, Radiation, Temperature)[seleccion>=0.8,]
+```
+
+Para ajustar el modelo lineal se utiliza la función `lm` donde las variables a enfrentar se separan por el caracter *~*
+
+```{r}
+Modelo1 <- lm(Radiation ~ Temperature, data=dfentrenamiento)
+```
+
+Con la función `summary()` se observar el modelo ajustado para obtener un sumario de los resultados con este ajuste.
+
+```{r}
+summary(Modelo1)
+```
+How to read this summary:
+
+Entre los datos de mayor importancia del sumario están:
+a) **Residuals**: brinda las estadisticas de distribución entre las diferencias de los valores predecidos y de los datos reales.
+b)  **Coefficients**: contiene el valor estimado, error y estadisticas de confiabilidad. Los **Signif. codes** de cada predictor podrán ser uno, dos o tres asteriscos, los que significa que esos predictores pueden explicar correctamente la variabilidad. En cambio un punto o un espacio en blanco indican que se esta ante un predictor que devolvera resultados pobres.
+En este caso se obtiene un triple asterisco lo que indica que el predictor puede explicar correctamente la variabilidad.
+c) **Residual standard error**: en este caso no dirá demasiado, ya que su utilidad esta en compararlo entre dos modelos.
+d) **Multiple R-squared** (R$^2$): esta metrica explica cuanto porcentaje de variación de los datos puede ser explicado por este modelo.
+Es un número entre 0 y 1, donde 0 no explica ninguna variación y 1 explica el 100% de la variación de la variable objetivo.
+En este caso se obtiene un 0.5394
+e) **F-test**: con este resultado se testea el ajuste en general del modelo. Comprobara si al menos un predictor o conjunto de ellos tiene un poder de explicación significativo. Si el *p-value* es menor que 0.05 la hipotesis de un R$^2$ de cero es rechazada.
+
+Con la función `plot()` se pueden obtener gráficos del modelo ajustado.
+
+```{r}
+plot(Modelo1)
+```
+
+El primer gráfico exhibe los residuales contra los valores ajustados. En este caso la línea roja debería estar cerca de la linea 0 de residuales.
+
+El segundo muestra si la distribución de los residuales es similar a un Gaussiano. Deberá controlarse si los puntos estan mayormente cercanos a la diagonal (Aunque alguna desviación en los extremos izquierdo y derecho es aceptable)
+
+El tercer gráfico no es explicado para este trabajo.
+
+El último muestra el apalancamiento de los puntos. Debido a que los modelos de regresión lineal pueden ser fuertemente influenciados por outliers (Valores atípicos), los cuales pueden alejar la linea de regresión de la distribución principal de puntos. 
+Los outliers son puntos con altos niveles de apalancamiento, por ello este gráfico es una forma de comprobar si existen outliers que estan sesgando el modelo.
+Si la linea roja eta cerca de la línea punteada horizontal cerca del valor 0 de los residuales estandarizados, el modelo funcionara correctamente.
+
+
+Con la función `predict()` se pasarán los valores del modelo ajustado y los datos del dataframe **dfentrenamiento** para poder generar las predicciones en **predRadiation**
+
+```{r}
+predRadiation <- predict(Modelo1, newdata=dfentrenamiento)
+```
+
+Posteriormente las predicciones se agregan a una nueva columna dentro del dataset **dfentrenamiento** con la función `cbind()`
+
+```{r}
+dfentrenamiento <- cbind(dfentrenamiento, predRadiation)
+```
+
+Una vez hecho esto, se pueden gráficar los datos y el modelo:
+
+```{r}
+ggplot(dfentrenamiento) +
+  geom_point(aes(x=Temperature, y=Radiation), color="steel blue") +
+  geom_line(aes(x=Temperature, y=predRadiation), color="firebrick", size=2) + 
+  ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y TEMPERATURA") +
+  xlab("Temperatura (ºF)") +
+ylab("Radiación solar (w/m^2")
+```
+Comprobar el modelo con los datos usados para entrenarlo produce una subestimación los errores reales. 
+Para hacer un correcto testeo del modelo se deben comprobar los datos que nunca se han visto, esto son: los datos separados anteriormente con el proposito de testeo.
+.
+
+```{r}
+dftesteo$predRadiation <- predict(Modelo1, newdata=dftesteo)
+ggplot(dftesteo) +
+  geom_point(aes(x=Temperature, y=Radiation), color="steel blue") +
+  geom_line(aes(x=Temperature, y=predRadiation), color="firebrick" , size=2) +
+  ggtitle("TESTEO DE CORRELACIÓN ENTRE RADIACIÓN SOLAR Y TEMPERATURA") +
+  xlab("Temperatura (ºF)") +
+ylab("Radiación solar (w/m^2")
+```
+
+Con la función `round()` es posible comprobar la diferencia porcental entre la radiación predecida y la radiación real:
+
+```{r}
+paste("Radiación total predecida:", round(sum(dftesteo$predRadiation),2), "w/m^2^")
+paste("Radiación real:", round(sum(dftesteo$Radiation,2)))
+paste("PDiferencia porcentual:", round((sum(dftesteo$predRadiation)-sum(dftesteo$Radiation))/sum(dftesteo$Radiation)*100, 2), "%")
+```
+Hay un diferencia porcentual del 1.31%, sin embargo las predicciones individuales de la radiación fluctuan un poco:
+
+```{r}
+res <- dftesteo$Radiation - dftesteo$predRadiation
+res[1:10]
+```
+### MODELO 2 - REGRESIÓN LINEAL MULTIPLE: RADIACIÓN EN BASE A LA TEMPERATURA Y PRESIÓN BAROMÉTRICA.
+
+Para la creación de este modelo se repiten los pasos ya explicitados en el acapite anterior a partir de la división del dataframe original en uno de entrenamiento y otro de testo en una propoción 80/20 respectivamente.
+A su vez como puede observarse se agrega la variable **Pressure**
+
+```{r}
+set.seed(2312)
+seleccion <- runif(dim(radiacion)[1])
+dfentrenamiento2 <- select(radiacion, Radiation, Temperature, Pressure)[seleccion<0.8,]
+dftesteo2 <- select(radiacion, Radiation, Temperature, Pressure)[seleccion>=0.8,]
+```
+
+Como ya se ha dicho para ajustar el modelo lineal se utiliza la función `lm` donde las variables a enfrentar se separan por el caracter *~*.
+A su vez en este caso, con el **+** se suma una variable mas.
+
+```{r}
+Modelo2 <- lm(Radiation ~ Temperature + Pressure, data=dfentrenamiento2)
+```
+
+Se hace un sumario del nuevo modelo y se obtiene que la nueva variable también es evaluada con tres asteríscos lo cual es positivo. 
+
+A su vez el R^2^ ha subido de 0.5394 a 0.5528 acercandose mas al valor objetivo 1.
+
+```{r}
+summary(Modelo2)
+```
+Los gráficos del nuevo modelo también se muestran saludables en base a lo ya analizado en el acapite anterior.
+
+```{r}
+plot(Modelo2)
+```
+
+Nuevamente con la función `predict()` se pasarán los valores del modelo ajustado y los datos del dataframe **dfentrenamiento2** para poder generar las predicciones en **predRadiation2**
+
+```{r}
+predRadiation2 <- predict(Modelo2, newdata=dfentrenamiento2)
+```
+
+Se agrega la columna con las predicciones al dataset.
+
+```{r}
+dfentrenamiento2 <- cbind(dfentrenamiento2, predRadiation2)
+```
+
+Finalmente se grafican el nuevos modelos enfrentandolo en un gráfico con la variable **Temperatura** y en otro con **Presión**.
+Considerando que ahora las predicciones utilizan mas variables, se ha cambiado la recta por un gráfico de puntos para una correcta visualización:
+
+```{r}
+ggplot(dfentrenamiento2) +
+ geom_point(aes(x=Temperature, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Temperature, y=predRadiation2), color="green", size=1) +
+  ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y TEMPERATURA") +
+  xlab("Temperatura (ºF)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+ggplot(dfentrenamiento2) +
+ geom_point(aes(x=Pressure, y=Radiation), color ="steel blue") +
+  geom_point(aes(x=Pressure, y=predRadiation2), color="green", size=1) +
+  ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y PRESIÓN BAROMÉTRICA") +
+  xlab("Presión barométrica (ºHg)") +
+ylab("Radiación solar (w/m^2")
+```
+Se realizan nuevamente las comprobaciones, pero esta vez para el nuevo modelo:
+
+```{r}
+dftesteo2$predRadiation2 <- predict(Modelo2, newdata=dftesteo2)
+ggplot(dftesteo2) +
+  geom_point(aes(x=Temperature, y=Radiation), color="steel blue") +
+  geom_point(aes(x=Temperature, y=predRadiation2), color="green", size=1) +
+  ggtitle("TESTEO CORRELACIÓN ENTRE RADIACIÓN SOLAR Y TEMPERATURA") +
+  xlab("Temperatura (ºF)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+dftesteo2$predRadiation2 <- predict(Modelo2, newdata=dftesteo2)
+ggplot(dftesteo2) +
+  geom_point(aes(x=Pressure, y=Radiation), color="steel blue") +
+  geom_point(aes(x=Pressure, y=predRadiation2), color="green", size=1) +
+  ggtitle("TESTEO CORRELACIÓN ENTRE RADIACIÓN SOLAR Y PRESIÓN BAROMÉTRICA") +
+  xlab("Presión barométrica (Hg)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+paste("Radiación total predecida:", round(sum(dftesteo2$predRadiation2),2), "w/m^2^")
+paste("Radiación real:", round(sum(dftesteo2$Radiation,2)))
+paste("PDiferencia porcentual:", round((sum(dftesteo2$predRadiation2)-sum(dftesteo2$Radiation))/sum(dftesteo2$Radiation)*100, 2), "%")
+```
+
+```{r}
+res <- dftesteo2$Radiation - dftesteo2$predRadiation2
+res[1:10]
+```
+
+### MODELO 3 - MODELO DE REGRESION LINEAL MULTIPLE: RADIACIÓN EN BASE A TODAS LAS VARIABLES
+
+Para este modelo se vuelven a crear nuevos dataframe de entrenamiento y testeo.
+Como puede observarse con la funcion `variables_scar = c()` se seleccionan algunas variables con el objetivo de quitarlas de los nuevos dataframe **radiacion** que no serviran para el modelo: **UNIXTime**, **Data** y **Mes**
+
+El resto de las varibles serán abarcadas por el modelo:
+
+```{r}
+set.seed(2312)
+seleccion <- runif(dim(radiacion)[1])
+variables_sacar = c("UNIXTime", "Data", "TimeSunRise", "TimeSunSet", "Time")
+dfentrenamiento3 <- select(radiacion, -variables_sacar)[seleccion<0.8,]
+dftesteo3 <- select(radiacion, -variables_sacar)[seleccion>=0.8,]
+```
+
+En este caso para ajustar el modelo se utiliza el caracter **~** seguido por un punto **.**, lo cual significa que se ajustara la radiación a todas las variables (Excepto las que se quitaron en el punto anterior)
+
+Posteriormente se hace un sumario y se observa que todas las variables son calificados con un triple asterisco y el R^2^ ha aumentado ahora a 0.5652, por lo tanto ninguno de estos predictores será descartado.
+
+```{r}
+RadiacionModelfull <- lm(Radiation ~ ., data=dfentrenamiento3)
+summary(RadiacionModelfull)
+```
+
+```{r}
+plot(RadiacionModelfull)
+```
+
+Un analisis extra es calcular los VIFS del modelo a traves de la función `vif()`. Esto es utilizado para conocer como el mismo es afectado por determinados predictores.
+
+```{r}
+vif(RadiacionModelfull)
+```
+Analizando los VIFs, es posible observar que ninguna de las variables perjudicaría al modelo.
+
+Se repiten los pasos ya explicados:
+
+```{r}
+predRadiation3 <- predict(RadiacionModelfull, newdata=dfentrenamiento3)
+```
+
+```{r}
+dfentrenamiento3 <- cbind(dfentrenamiento3, predRadiation3)
+```
+
+Finalmente se gráfica el modelo completo:
+
+```{r}
+ggplot(dfentrenamiento3) +
+ geom_point(aes(x=Temperature, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Temperature, y=predRadiation3), color="green", size=1) +
+  ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y TEMPERATURA") +
+  xlab("Temperatura (ºF)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+ggplot(dfentrenamiento3) +
+ geom_point(aes(x=Pressure, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Pressure, y=predRadiation3), color="green", size=1) +
+  ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y PRESIÓN BAROMÉTRICA") +
+  xlab("Presión barométrica (Hg)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+ggplot(dfentrenamiento3) +
+ geom_point(aes(x=Humidity, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Humidity, y=predRadiation3), color="green", size=1) +
+  ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y HUMEDAD") +
+  xlab("Humedad (%)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+ggplot(dfentrenamiento3) +
+ geom_point(aes(x=Speed, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Speed, y=predRadiation3), color="green", size=1) +
+  ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y VELOCIDAD DEL VIENTO") +
+  xlab("Velocidad del viento (m/h)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+ggplot(dfentrenamiento3) +
+ geom_point(aes(x=WindDirection.Degrees., y=Radiation), color="steel blue") +
+ geom_point(aes(x=WindDirection.Degrees., y=predRadiation3), color="green", size=1) +
+  ggtitle("CORRELACIÓN ENTRE RADIACIÓN SOLAR Y DIRECCIÓN DEL VIENTO") +
+  xlab("Dirección del viento (º)") +
+ylab("Radiación solar (w/m^2")
+```
+Se realizan las comprobaciones:
+
+```{r}
+dftesteo3$predRadiation3 <- predict(RadiacionModelfull, newdata=dftesteo3)
+ggplot(dftesteo3) +
+ geom_point(aes(x=Temperature, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Temperature, y=predRadiation3), color="green", size=1) +
+  ggtitle("TESTEO CORRELACIÓN ENTRE RADIACIÓN SOLAR Y TEMPERATURA") +
+  xlab("Temperatura (ºF)") +
+ylab("Radiación solar (w/m^2")
+```
+
+
+```{r}
+dftesteo3$predRadiation3 <- predict(RadiacionModelfull, newdata=dftesteo3)
+ggplot(dftesteo3) +
+ geom_point(aes(x=Pressure, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Pressure, y=predRadiation3), color="green", size=1) +
+  ggtitle("TESTEO CORRELACIÓN ENTRE RADIACIÓN SOLAR Y PRESIÓN BAROMÉTRICA") +
+  xlab("Presión barométrica (Hg)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+dftesteo3$predRadiation3 <- predict(RadiacionModelfull, newdata=dftesteo3)
+ggplot(dftesteo3) +
+ geom_point(aes(x=Humidity, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Humidity, y=predRadiation3), color="green", size=1) +
+  ggtitle("TESTEO CORRELACIÓN ENTRE RADIACIÓN SOLAR Y HUMEDAD") +
+  xlab("Humedad (%)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+dftesteo3$predRadiation3 <- predict(RadiacionModelfull, newdata=dftesteo3)
+ggplot(dftesteo3) +
+ geom_point(aes(x=Speed, y=Radiation), color="steel blue") +
+ geom_point(aes(x=Speed, y=predRadiation3), color="green", size=1) +
+  ggtitle("TESTEO CORRELACIÓN ENTRE RADIACIÓN SOLAR Y VELOCIDAD DEL VIENTO") +
+  xlab("Velocidad del viento (m/h)") +
+ylab("Radiación solar (w/m^2")
+```
+
+```{r}
+dftesteo3$predRadiation3 <- predict(RadiacionModelfull, newdata=dftesteo3)
+ggplot(dftesteo3) +
+ geom_point(aes(x=WindDirection.Degrees., y=Radiation), color="steel blue") +
+ geom_point(aes(x=WindDirection.Degrees., y=predRadiation3), color="green", size=1) +
+  ggtitle("TESTEO CORRELACIÓN ENTRE RADIACIÓN SOLAR Y DIRECCIÓN DEL VIENTO") +
+  xlab("Dirección del viento (º)") +
+ylab("Radiación solar (w/m^2")
+```
+```{r}
+paste("Radiación total predecida:", round(sum(dftesteo3$predRadiation3),2), "w/m^2^")
+paste("Radiación real:", round(sum(dftesteo3$Radiation,2)))
+paste("PDiferencia porcentual:", round((sum(dftesteo3$predRadiation3)-sum(dftesteo3$Radiation))/sum(dftesteo3$Radiation)*100, 2), "%")
+```
+
+```{r}
+res <- dftesteo3$Radiation - dftesteo3$predRadiation3
+res[1:10]
+```
+
+## BIBLIOGRAFIA
+
+Office of Energy Efficiency and Renewable Energies of United States of America.(s.f.) *Solar Radiation Basics* Department of Energy. https://www.energy.gov/eere/solar/solar-radiation-basics
